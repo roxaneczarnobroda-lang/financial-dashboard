@@ -11,13 +11,24 @@ const TEAL = "#3E6E64";
 const CLAY = "#B5533C";
 const SAND = "#E4DCC8";
 const BORDER = "#E5E0D4";
+const MAUVE = "#8B6F9E";
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n || 0);
 
+// GBP balances below are converted at ~1 GBP = 1.1757 EUR (20 Jul 2026) and not
+// live-updated — revisit if the rate moves a lot.
 const DEFAULT_INPUTS = {
   trackingStart: new Date().toISOString().slice(0, 10),
-  livretA: { balance: 0, rate: 0.03 },
+  savings: {
+    livretA: { balance: 25000, rate: 0.015 },
+    // Placeholder rate — PEL rates are locked in at account opening and vary by
+    // vintage, so this can't be looked up. Replace with your actual contract rate.
+    pel: { balance: 61000, rate: 0.015 },
+    isaPlum: { balance: 24419, rate: 0.027 }, // £20,770 AER 2.7%
+  },
   etf: { current: 500, planned: 50000, plannedDate: "2026-09", expectedReturn: 0.07, volatility: 0.15 },
+  moneyfarm: { balance: 17636, expectedReturn: 0.0378, volatility: 0.12 }, // £15,000
+  pension: { balance: 77172, rate: 0.05, volatility: 0.1 }, // £65,639, rate is a rough estimate, see note below
   scpi: { invested: 0, expectedReturn: 0.045, volatility: 0.05 },
   reCurrent: { value: 0, loanPrincipal: 0, loanRate: 0.035, loanTermYears: 20 },
   reFuture: { enabled: false, price: 0, downPayment: 0, loanRate: 0.035, loanTermYears: 20, startYear: new Date().getFullYear() + 1 },
@@ -29,7 +40,9 @@ function useStoredInputs() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await storage.get("fd-inputs");
+        // Bumped key: the input shape changed (savings/moneyfarm/pension added),
+        // so any older "fd-inputs" data is incompatible and deliberately ignored.
+        const r = await storage.get("fd-inputs-v2");
         if (r?.value) setInputs(JSON.parse(r.value));
       } catch (e) {}
       setLoaded(true);
@@ -37,7 +50,7 @@ function useStoredInputs() {
   }, []);
   const save = async (next) => {
     setInputs(next);
-    try { await storage.set("fd-inputs", JSON.stringify(next)); } catch (e) {}
+    try { await storage.set("fd-inputs-v2", JSON.stringify(next)); } catch (e) {}
   };
   return [inputs, save, loaded];
 }
@@ -94,8 +107,11 @@ function Card({ children, style }) {
 
 function computeTotals(inputs, includeFuture) {
   let invested = 0, borrowed = 0, value = 0;
-  invested += inputs.livretA.balance; value += inputs.livretA.balance;
+  const savingsTotal = inputs.savings.livretA.balance + inputs.savings.pel.balance + inputs.savings.isaPlum.balance;
+  invested += savingsTotal; value += savingsTotal;
   invested += inputs.etf.current; value += inputs.etf.current;
+  invested += inputs.moneyfarm.balance; value += inputs.moneyfarm.balance;
+  invested += inputs.pension.balance; value += inputs.pension.balance;
   invested += inputs.scpi.invested; value += inputs.scpi.invested;
   invested += inputs.reCurrent.value; value += inputs.reCurrent.value;
   borrowed += inputs.reCurrent.loanPrincipal;
@@ -113,25 +129,30 @@ function computeTotals(inputs, includeFuture) {
 }
 
 function allocationData(inputs, includeFuture) {
+  const savingsTotal = inputs.savings.livretA.balance + inputs.savings.pel.balance + inputs.savings.isaPlum.balance;
   const etfAmt = inputs.etf.current + (includeFuture ? inputs.etf.planned : 0);
+  const avLinxeaAmt = etfAmt + inputs.moneyfarm.balance;
   const reAmt = inputs.reCurrent.value + (includeFuture && inputs.reFuture.enabled ? inputs.reFuture.price : 0);
+  const pensionAmt = inputs.pension.balance;
+
   const byClass = [
-    { name: "Livret A", value: inputs.livretA.balance, color: SAND },
-    { name: "ETF", value: etfAmt, color: GOLD },
+    { name: "Épargne", value: savingsTotal, color: SAND },
+    { name: "AV (Linxea)", value: avLinxeaAmt, color: GOLD },
     { name: "SCPI", value: inputs.scpi.invested, color: TEAL },
     { name: "Immobilier", value: reAmt, color: CLAY },
+    { name: "Pension", value: pensionAmt, color: MAUVE },
   ].filter((d) => d.value > 0);
 
-  const liquid = inputs.livretA.balance + etfAmt;
-  const illiquid = inputs.scpi.invested + reAmt;
+  const liquid = savingsTotal + avLinxeaAmt;
+  const illiquid = inputs.scpi.invested + reAmt + pensionAmt;
   const byLiquidity = [
     { name: "Liquide", value: liquid, color: GOLD },
     { name: "Illiquide", value: illiquid, color: TEAL },
   ].filter((d) => d.value > 0);
 
-  const low = inputs.livretA.balance;
-  const mid = inputs.scpi.invested;
-  const high = etfAmt + reAmt;
+  const low = savingsTotal;
+  const mid = inputs.scpi.invested + pensionAmt;
+  const high = avLinxeaAmt + reAmt;
   const byRisk = [
     { name: "Faible", value: low, color: TEAL },
     { name: "Moyen", value: mid, color: GOLD },
@@ -191,9 +212,13 @@ function runMonteCarlo(inputs, years, includeFuture, sims = 500) {
   const reFutureOffset = Math.max(0, inputs.reFuture.startYear - currentYear);
 
   const assets = [];
-  if (inputs.livretA.balance > 0) assets.push({ v: inputs.livretA.balance, r: inputs.livretA.rate, vol: 0.001, startOffset: 0 });
+  if (inputs.savings.livretA.balance > 0) assets.push({ v: inputs.savings.livretA.balance, r: inputs.savings.livretA.rate, vol: 0.001, startOffset: 0 });
+  if (inputs.savings.pel.balance > 0) assets.push({ v: inputs.savings.pel.balance, r: inputs.savings.pel.rate, vol: 0.001, startOffset: 0 });
+  if (inputs.savings.isaPlum.balance > 0) assets.push({ v: inputs.savings.isaPlum.balance, r: inputs.savings.isaPlum.rate, vol: 0.001, startOffset: 0 });
   if (inputs.etf.current > 0) assets.push({ v: inputs.etf.current, r: inputs.etf.expectedReturn, vol: inputs.etf.volatility, startOffset: 0 });
   if (includeFuture && inputs.etf.planned > 0) assets.push({ v: inputs.etf.planned, r: inputs.etf.expectedReturn, vol: inputs.etf.volatility, startOffset: 0 });
+  if (inputs.moneyfarm.balance > 0) assets.push({ v: inputs.moneyfarm.balance, r: inputs.moneyfarm.expectedReturn, vol: inputs.moneyfarm.volatility, startOffset: 0 });
+  if (inputs.pension.balance > 0) assets.push({ v: inputs.pension.balance, r: inputs.pension.rate, vol: inputs.pension.volatility, startOffset: 0 });
   if (inputs.scpi.invested > 0) assets.push({ v: inputs.scpi.invested, r: inputs.scpi.expectedReturn, vol: inputs.scpi.volatility, startOffset: 0 });
   if (inputs.reCurrent.value > 0) assets.push({ v: inputs.reCurrent.value, r: 0.02, vol: 0.06, startOffset: 0 });
   if (includeFuture && inputs.reFuture.enabled && inputs.reFuture.price > 0) {
@@ -332,8 +357,9 @@ export default function FinancialDashboard() {
     setChatLoading(true);
     setReflectionStage("draft");
     const context = `Contexte patrimoine de Roxane (chiffres actuels):
-- Livret A: ${fmt(inputs.livretA.balance)}
-- ETF (Linxea): ${fmt(inputs.etf.current)} actuel, ${fmt(inputs.etf.planned)} prévu (${inputs.etf.plannedDate})
+- Épargne — Livret A: ${fmt(inputs.savings.livretA.balance)}, PEL: ${fmt(inputs.savings.pel.balance)}, ISA (Plum): ${fmt(inputs.savings.isaPlum.balance)}
+- AV (Linxea) — ETF: ${fmt(inputs.etf.current)} actuel, ${fmt(inputs.etf.planned)} prévu (${inputs.etf.plannedDate}), Moneyfarm: ${fmt(inputs.moneyfarm.balance)}
+- Pension (Standard Life, Trust Based): ${fmt(inputs.pension.balance)}
 - SCPI: ${fmt(inputs.scpi.invested)}
 - Immobilier actuel: ${fmt(inputs.reCurrent.value)}, emprunt ${fmt(inputs.reCurrent.loanPrincipal)}
 - Scénario futur immobilier: ${inputs.reFuture.enabled ? fmt(inputs.reFuture.price) : "désactivé"}
@@ -434,20 +460,51 @@ Réponds en français, de façon concise et factuelle, basé uniquement sur ces 
             </div>
 
             <Card style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>Livret A</div>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>Épargne</div>
+
+              <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>Livret A</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <Field label="Solde" value={inputs.savings.livretA.balance} onChange={(v) => set("savings.livretA.balance", v)} suffix="€" />
+                <Field label="Taux annuel" value={inputs.savings.livretA.rate} onChange={(v) => set("savings.livretA.rate", v)} step="0.001" />
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>PEL</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <Field label="Solde" value={inputs.savings.pel.balance} onChange={(v) => set("savings.pel.balance", v)} suffix="€" />
+                <Field label="Taux annuel" value={inputs.savings.pel.rate} onChange={(v) => set("savings.pel.rate", v)} step="0.001" />
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>ISA (Plum)</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Field label="Solde" value={inputs.livretA.balance} onChange={(v) => set("livretA.balance", v)} suffix="€" />
-                <Field label="Taux annuel" value={inputs.livretA.rate} onChange={(v) => set("livretA.rate", v)} suffix="" step="0.001" />
+                <Field label="Solde" value={inputs.savings.isaPlum.balance} onChange={(v) => set("savings.isaPlum.balance", v)} suffix="€" />
+                <Field label="Taux annuel (AER)" value={inputs.savings.isaPlum.rate} onChange={(v) => set("savings.isaPlum.rate", v)} step="0.001" />
               </div>
             </Card>
 
             <Card style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>ETF (Linxea)</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>AV (Linxea)</div>
+
+              <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>ETF</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
                 <Field label="Montant actuel" value={inputs.etf.current} onChange={(v) => set("etf.current", v)} suffix="€" />
                 <Field label="Montant prévu" value={inputs.etf.planned} onChange={(v) => set("etf.planned", v)} suffix="€" />
                 <Field label="Date prévue" type="text" value={inputs.etf.plannedDate} onChange={(v) => set("etf.plannedDate", v)} />
                 <Field label="Rendement attendu" value={inputs.etf.expectedReturn} onChange={(v) => set("etf.expectedReturn", v)} step="0.001" />
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>Moneyfarm</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Montant" value={inputs.moneyfarm.balance} onChange={(v) => set("moneyfarm.balance", v)} suffix="€" />
+                <Field label="Rendement attendu" value={inputs.moneyfarm.expectedReturn} onChange={(v) => set("moneyfarm.expectedReturn", v)} step="0.001" />
+              </div>
+            </Card>
+
+            <Card style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>Pension</div>
+              <div style={{ fontSize: 12, color: INK_SOFT, marginBottom: 12 }}>Standard Life — Trust Based Pension</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Solde" value={inputs.pension.balance} onChange={(v) => set("pension.balance", v)} suffix="€" />
+                <Field label="Rendement attendu (estimation)" value={inputs.pension.rate} onChange={(v) => set("pension.rate", v)} step="0.001" />
               </div>
             </Card>
 
