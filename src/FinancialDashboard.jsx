@@ -45,8 +45,12 @@ const DEFAULT_INPUTS = {
     esicap: { balance: 41797.02, expectedReturn: 0.0701, volatility: 0.05, monthlyContribution: 0 },
     cristalLife: { balance: 42782.61, expectedReturn: 0.0654, volatility: 0.05, monthlyContribution: 0 },
   },
-  reCurrent: { value: 0, loanPrincipal: 0, loanRate: 0.035, loanTermYears: 20 },
-  reFuture: { enabled: false, price: 0, downPayment: 0, loanRate: 0.035, loanTermYears: 20, startYear: new Date().getFullYear() + 1 },
+  // Total return modeled = expectedReturn (capital appreciation) + rentalYield
+  // (net rental income after tax) — two different things: one is unrealized
+  // value growth, the other is actual cash yield, and they're both part of
+  // what owning the property actually returns.
+  reCurrent: { value: 0, loanPrincipal: 0, loanRate: 0.035, loanTermYears: 20, expectedReturn: 0.02, rentalYield: 0 },
+  reFuture: { enabled: false, price: 0, downPayment: 0, loanRate: 0.035, loanTermYears: 20, startYear: new Date().getFullYear() + 1, expectedReturn: 0.02, rentalYield: 0 },
   goal: { targetAmount: 0, targetYear: new Date().getFullYear() + 10 },
 };
 
@@ -136,6 +140,11 @@ function Card({ children, style }) {
 
 function scpiTotal(inputs) {
   return inputs.scpi.reason.balance + inputs.scpi.edrEuropa.balance + inputs.scpi.esicap.balance + inputs.scpi.cristalLife.balance;
+}
+
+// Total return on a property = capital appreciation + net rental yield.
+function realEstateTotalReturn(re) {
+  return re.expectedReturn + re.rentalYield;
 }
 
 function computeTotals(inputs, includeFuture) {
@@ -257,9 +266,9 @@ function runMonteCarlo(inputs, years, includeFuture, sims = 500) {
   for (const fund of Object.values(inputs.scpi)) {
     if (fund.balance > 0) assets.push({ v: fund.balance, r: fund.expectedReturn, vol: fund.volatility, startOffset: 0, contribution: (fund.monthlyContribution || 0) * 12 });
   }
-  if (inputs.reCurrent.value > 0) assets.push({ v: inputs.reCurrent.value, r: 0.02, vol: 0.06, startOffset: 0, contribution: 0 });
+  if (inputs.reCurrent.value > 0) assets.push({ v: inputs.reCurrent.value, r: realEstateTotalReturn(inputs.reCurrent), vol: 0.06, startOffset: 0, contribution: 0 });
   if (includeFuture && inputs.reFuture.enabled && inputs.reFuture.price > 0) {
-    assets.push({ v: inputs.reFuture.price, r: 0.02, vol: 0.06, startOffset: reFutureOffset, contribution: 0 });
+    assets.push({ v: inputs.reFuture.price, r: realEstateTotalReturn(inputs.reFuture), vol: 0.06, startOffset: reFutureOffset, contribution: 0 });
   }
 
   if (assets.length === 0) return [];
@@ -339,7 +348,7 @@ function blendedReturnRate(inputs) {
   add(inputs.moneyfarm.balance, inputs.moneyfarm.expectedReturn);
   add(inputs.pension.balance, inputs.pension.rate);
   for (const fund of Object.values(inputs.scpi)) add(fund.balance, fund.expectedReturn);
-  add(inputs.reCurrent.value, 0.02);
+  add(inputs.reCurrent.value, realEstateTotalReturn(inputs.reCurrent));
   return totalWeight > 0 ? weightedSum / totalWeight : 0;
 }
 
@@ -549,8 +558,8 @@ export default function FinancialDashboard() {
 - AV (Linxea) — ETF: ${fmt(inputs.etf.current)} actuel (rendement attendu ${pct(inputs.etf.expectedReturn)}), ${fmt(inputs.etf.planned)} prévu (${inputs.etf.plannedDate}), Moneyfarm: ${fmt(inputs.moneyfarm.balance)} (rendement attendu ${pct(inputs.moneyfarm.expectedReturn)})
 - Pension (Standard Life, Trust Based): ${fmt(inputs.pension.balance)} (rendement estimé ${pct(inputs.pension.rate)})
 - SCPI — Reason: ${fmt(inputs.scpi.reason.balance)} (${pct(inputs.scpi.reason.expectedReturn)}), EDR Europa: ${fmt(inputs.scpi.edrEuropa.balance)} (${pct(inputs.scpi.edrEuropa.expectedReturn)}), ESICAP REIM: ${fmt(inputs.scpi.esicap.balance)} (${pct(inputs.scpi.esicap.expectedReturn)}), Cristal Life: ${fmt(inputs.scpi.cristalLife.balance)} (${pct(inputs.scpi.cristalLife.expectedReturn)})
-- Immobilier actuel: ${fmt(inputs.reCurrent.value)}, emprunt ${fmt(inputs.reCurrent.loanPrincipal)} (taux ${pct(inputs.reCurrent.loanRate)}, durée ${inputs.reCurrent.loanTermYears} ans)
-- Scénario futur immobilier: ${inputs.reFuture.enabled ? `${fmt(inputs.reFuture.price)} (apport ${fmt(inputs.reFuture.downPayment)}, taux ${pct(inputs.reFuture.loanRate)}, achat prévu ${inputs.reFuture.startYear})` : "désactivé"}
+- Immobilier actuel: ${fmt(inputs.reCurrent.value)} (valorisation annuelle ${pct(inputs.reCurrent.expectedReturn)} + rendement locatif net ${pct(inputs.reCurrent.rentalYield)} = ${pct(realEstateTotalReturn(inputs.reCurrent))} au total), emprunt ${fmt(inputs.reCurrent.loanPrincipal)} (taux ${pct(inputs.reCurrent.loanRate)}, durée ${inputs.reCurrent.loanTermYears} ans)
+- Scénario futur immobilier: ${inputs.reFuture.enabled ? `${fmt(inputs.reFuture.price)} (valorisation annuelle ${pct(inputs.reFuture.expectedReturn)} + rendement locatif net ${pct(inputs.reFuture.rentalYield)} = ${pct(realEstateTotalReturn(inputs.reFuture))} au total, apport ${fmt(inputs.reFuture.downPayment)}, taux ${pct(inputs.reFuture.loanRate)}, achat prévu ${inputs.reFuture.startYear})` : "désactivé"}
 - Contributions mensuelles en cours: ${contributionLines || "aucune"}
 - Répartition par classe d'actif: ${allocLine}
 - Répartition par liquidité: ${liquidityLine}
@@ -753,6 +762,8 @@ Réponds en français, de façon concise et factuelle, basé sur ces chiffres et
                 <Field label="Capital emprunté" value={inputs.reCurrent.loanPrincipal} onChange={(v) => set("reCurrent.loanPrincipal", v)} suffix="€" />
                 <Field label="Taux du prêt" value={inputs.reCurrent.loanRate} onChange={(v) => set("reCurrent.loanRate", v)} step="0.001" />
                 <Field label="Durée (années)" value={inputs.reCurrent.loanTermYears} onChange={(v) => set("reCurrent.loanTermYears", v)} />
+                <Field label="Valorisation annuelle" value={inputs.reCurrent.expectedReturn} onChange={(v) => set("reCurrent.expectedReturn", v)} step="0.001" />
+                <Field label="Rendement locatif net (après impôts)" value={inputs.reCurrent.rentalYield} onChange={(v) => set("reCurrent.rentalYield", v)} step="0.001" />
               </div>
             </Card>
 
@@ -767,6 +778,8 @@ Réponds en français, de façon concise et factuelle, basé sur ces chiffres et
                   <Field label="Apport" value={inputs.reFuture.downPayment} onChange={(v) => set("reFuture.downPayment", v)} suffix="€" />
                   <Field label="Taux du prêt" value={inputs.reFuture.loanRate} onChange={(v) => set("reFuture.loanRate", v)} step="0.001" />
                   <Field label="Année de début" value={inputs.reFuture.startYear} onChange={(v) => set("reFuture.startYear", v)} />
+                  <Field label="Valorisation annuelle" value={inputs.reFuture.expectedReturn} onChange={(v) => set("reFuture.expectedReturn", v)} step="0.001" />
+                  <Field label="Rendement locatif net (après impôts)" value={inputs.reFuture.rentalYield} onChange={(v) => set("reFuture.rentalYield", v)} step="0.001" />
                 </div>
               )}
             </Card>
