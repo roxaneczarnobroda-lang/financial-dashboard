@@ -30,10 +30,33 @@ const DEFAULT_INPUTS = {
   etf: { current: 500, planned: 50000, plannedDate: "2026-09", expectedReturn: 0.07, volatility: 0.15 },
   moneyfarm: { balance: 17636, expectedReturn: 0.0378, volatility: 0.12 }, // £15,000
   pension: { balance: 77172, rate: 0.05, volatility: 0.1 }, // £65,639, rate is a rough estimate, see note below
-  scpi: { invested: 0, expectedReturn: 0.045, volatility: 0.05 },
+  // 2025 distribution rates looked up per fund; volatility is a rough guess by
+  // risk profile (Reason is a newer, more aggressive fund; the other three are
+  // more established), not sourced data.
+  scpi: {
+    reason: { balance: 35000, expectedReturn: 0.129, volatility: 0.08 },
+    edrEuropa: { balance: 35000, expectedReturn: 0.0875, volatility: 0.06 },
+    esicap: { balance: 41797.02, expectedReturn: 0.0701, volatility: 0.05 },
+    cristalLife: { balance: 42782.61, expectedReturn: 0.0654, volatility: 0.05 },
+  },
   reCurrent: { value: 0, loanPrincipal: 0, loanRate: 0.035, loanTermYears: 20 },
   reFuture: { enabled: false, price: 0, downPayment: 0, loanRate: 0.035, loanTermYears: 20, startYear: new Date().getFullYear() + 1 },
 };
+
+// Recursively fills in any key missing from `saved` with the value from
+// `base`, instead of a blind replace — so when the input shape grows (like
+// SCPI going from one lump sum to four named funds), previously-saved edits
+// to unrelated fields (rates you've already corrected, for example) survive.
+function deepMerge(base, saved) {
+  if (saved === undefined) return base;
+  if (typeof base !== "object" || base === null || Array.isArray(base)) return saved;
+  if (typeof saved !== "object" || saved === null || Array.isArray(saved)) return base;
+  const result = {};
+  for (const key of Object.keys(base)) {
+    result[key] = deepMerge(base[key], saved[key]);
+  }
+  return result;
+}
 
 function useStoredInputs() {
   const [inputs, setInputs] = useState(DEFAULT_INPUTS);
@@ -41,10 +64,8 @@ function useStoredInputs() {
   useEffect(() => {
     (async () => {
       try {
-        // Bumped key: the input shape changed (savings/moneyfarm/pension added),
-        // so any older "fd-inputs" data is incompatible and deliberately ignored.
         const r = await storage.get("fd-inputs-v2");
-        if (r?.value) setInputs(JSON.parse(r.value));
+        if (r?.value) setInputs(deepMerge(DEFAULT_INPUTS, JSON.parse(r.value)));
       } catch (e) {}
       setLoaded(true);
     })();
@@ -106,6 +127,10 @@ function Card({ children, style }) {
   );
 }
 
+function scpiTotal(inputs) {
+  return inputs.scpi.reason.balance + inputs.scpi.edrEuropa.balance + inputs.scpi.esicap.balance + inputs.scpi.cristalLife.balance;
+}
+
 function computeTotals(inputs, includeFuture) {
   let invested = 0, borrowed = 0, value = 0;
   const savingsTotal = inputs.savings.livretA.balance + inputs.savings.pel.balance + inputs.savings.isaPlum.balance;
@@ -113,7 +138,8 @@ function computeTotals(inputs, includeFuture) {
   invested += inputs.etf.current; value += inputs.etf.current;
   invested += inputs.moneyfarm.balance; value += inputs.moneyfarm.balance;
   invested += inputs.pension.balance; value += inputs.pension.balance;
-  invested += inputs.scpi.invested; value += inputs.scpi.invested;
+  const scpiAmt = scpiTotal(inputs);
+  invested += scpiAmt; value += scpiAmt;
   invested += inputs.reCurrent.value; value += inputs.reCurrent.value;
   borrowed += inputs.reCurrent.loanPrincipal;
   if (includeFuture) {
@@ -135,24 +161,25 @@ function allocationData(inputs, includeFuture) {
   const avLinxeaAmt = etfAmt + inputs.moneyfarm.balance;
   const reAmt = inputs.reCurrent.value + (includeFuture && inputs.reFuture.enabled ? inputs.reFuture.price : 0);
   const pensionAmt = inputs.pension.balance;
+  const scpiAmt = scpiTotal(inputs);
 
   const byClass = [
     { name: "Épargne", value: savingsTotal, color: SAND },
     { name: "AV (Linxea)", value: avLinxeaAmt, color: GOLD },
-    { name: "SCPI", value: inputs.scpi.invested, color: TEAL },
+    { name: "SCPI", value: scpiAmt, color: TEAL },
     { name: "Immobilier", value: reAmt, color: CLAY },
     { name: "Pension", value: pensionAmt, color: MAUVE },
   ].filter((d) => d.value > 0);
 
   const liquid = savingsTotal + avLinxeaAmt;
-  const illiquid = inputs.scpi.invested + reAmt + pensionAmt;
+  const illiquid = scpiAmt + reAmt + pensionAmt;
   const byLiquidity = [
     { name: "Liquide", value: liquid, color: GOLD },
     { name: "Illiquide", value: illiquid, color: TEAL },
   ].filter((d) => d.value > 0);
 
   const low = savingsTotal;
-  const mid = inputs.scpi.invested + pensionAmt;
+  const mid = scpiAmt + pensionAmt;
   const high = avLinxeaAmt + reAmt;
   const byRisk = [
     { name: "Faible", value: low, color: TEAL },
@@ -220,7 +247,9 @@ function runMonteCarlo(inputs, years, includeFuture, sims = 500) {
   if (includeFuture && inputs.etf.planned > 0) assets.push({ v: inputs.etf.planned, r: inputs.etf.expectedReturn, vol: inputs.etf.volatility, startOffset: 0 });
   if (inputs.moneyfarm.balance > 0) assets.push({ v: inputs.moneyfarm.balance, r: inputs.moneyfarm.expectedReturn, vol: inputs.moneyfarm.volatility, startOffset: 0 });
   if (inputs.pension.balance > 0) assets.push({ v: inputs.pension.balance, r: inputs.pension.rate, vol: inputs.pension.volatility, startOffset: 0 });
-  if (inputs.scpi.invested > 0) assets.push({ v: inputs.scpi.invested, r: inputs.scpi.expectedReturn, vol: inputs.scpi.volatility, startOffset: 0 });
+  for (const fund of Object.values(inputs.scpi)) {
+    if (fund.balance > 0) assets.push({ v: fund.balance, r: fund.expectedReturn, vol: fund.volatility, startOffset: 0 });
+  }
   if (inputs.reCurrent.value > 0) assets.push({ v: inputs.reCurrent.value, r: 0.02, vol: 0.06, startOffset: 0 });
   if (includeFuture && inputs.reFuture.enabled && inputs.reFuture.price > 0) {
     assets.push({ v: inputs.reFuture.price, r: 0.02, vol: 0.06, startOffset: reFutureOffset });
@@ -361,7 +390,7 @@ export default function FinancialDashboard() {
 - Épargne — Livret A: ${fmt(inputs.savings.livretA.balance)} (taux ${pct(inputs.savings.livretA.rate)}), PEL: ${fmt(inputs.savings.pel.balance)} (taux ${pct(inputs.savings.pel.rate)}), ISA (Plum): ${fmt(inputs.savings.isaPlum.balance)} (AER ${pct(inputs.savings.isaPlum.rate)})
 - AV (Linxea) — ETF: ${fmt(inputs.etf.current)} actuel (rendement attendu ${pct(inputs.etf.expectedReturn)}), ${fmt(inputs.etf.planned)} prévu (${inputs.etf.plannedDate}), Moneyfarm: ${fmt(inputs.moneyfarm.balance)} (rendement attendu ${pct(inputs.moneyfarm.expectedReturn)})
 - Pension (Standard Life, Trust Based): ${fmt(inputs.pension.balance)} (rendement estimé ${pct(inputs.pension.rate)})
-- SCPI: ${fmt(inputs.scpi.invested)} (rendement attendu ${pct(inputs.scpi.expectedReturn)})
+- SCPI — Reason: ${fmt(inputs.scpi.reason.balance)} (${pct(inputs.scpi.reason.expectedReturn)}), EDR Europa: ${fmt(inputs.scpi.edrEuropa.balance)} (${pct(inputs.scpi.edrEuropa.expectedReturn)}), ESICAP REIM: ${fmt(inputs.scpi.esicap.balance)} (${pct(inputs.scpi.esicap.expectedReturn)}), Cristal Life: ${fmt(inputs.scpi.cristalLife.balance)} (${pct(inputs.scpi.cristalLife.expectedReturn)})
 - Immobilier actuel: ${fmt(inputs.reCurrent.value)}, emprunt ${fmt(inputs.reCurrent.loanPrincipal)} (taux ${pct(inputs.reCurrent.loanRate)}, durée ${inputs.reCurrent.loanTermYears} ans)
 - Scénario futur immobilier: ${inputs.reFuture.enabled ? `${fmt(inputs.reFuture.price)} (apport ${fmt(inputs.reFuture.downPayment)}, taux ${pct(inputs.reFuture.loanRate)}, achat prévu ${inputs.reFuture.startYear})` : "désactivé"}
 - Total investi (${includeFuture ? "avec" : "sans"} futur): ${fmt(totals.invested)}
@@ -511,9 +540,29 @@ Réponds en français, de façon concise et factuelle, basé uniquement sur ces 
 
             <Card style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>SCPI</div>
+
+              <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>Reason</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <Field label="Montant" value={inputs.scpi.reason.balance} onChange={(v) => set("scpi.reason.balance", v)} suffix="€" />
+                <Field label="Rendement attendu" value={inputs.scpi.reason.expectedReturn} onChange={(v) => set("scpi.reason.expectedReturn", v)} step="0.001" />
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>EDR Europa</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <Field label="Montant" value={inputs.scpi.edrEuropa.balance} onChange={(v) => set("scpi.edrEuropa.balance", v)} suffix="€" />
+                <Field label="Rendement attendu" value={inputs.scpi.edrEuropa.expectedReturn} onChange={(v) => set("scpi.edrEuropa.expectedReturn", v)} step="0.001" />
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>ESICAP REIM</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <Field label="Montant" value={inputs.scpi.esicap.balance} onChange={(v) => set("scpi.esicap.balance", v)} suffix="€" />
+                <Field label="Rendement attendu" value={inputs.scpi.esicap.expectedReturn} onChange={(v) => set("scpi.esicap.expectedReturn", v)} step="0.001" />
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>Cristal Life (Inter Gestion)</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <Field label="Montant investi" value={inputs.scpi.invested} onChange={(v) => set("scpi.invested", v)} suffix="€" />
-                <Field label="Rendement attendu" value={inputs.scpi.expectedReturn} onChange={(v) => set("scpi.expectedReturn", v)} step="0.001" />
+                <Field label="Montant" value={inputs.scpi.cristalLife.balance} onChange={(v) => set("scpi.cristalLife.balance", v)} suffix="€" />
+                <Field label="Rendement attendu" value={inputs.scpi.cristalLife.expectedReturn} onChange={(v) => set("scpi.cristalLife.expectedReturn", v)} step="0.001" />
               </div>
             </Card>
 
