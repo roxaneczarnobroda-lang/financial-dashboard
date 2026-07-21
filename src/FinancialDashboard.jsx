@@ -14,6 +14,7 @@ const BORDER = "#E5E0D4";
 const MAUVE = "#8B6F9E";
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n || 0);
+const pct = (n) => `${((n || 0) * 100).toFixed(2)}%`;
 
 // GBP balances below are converted at ~1 GBP = 1.1757 EUR (20 Jul 2026) and not
 // live-updated — revisit if the rate moves a lot.
@@ -357,12 +358,12 @@ export default function FinancialDashboard() {
     setChatLoading(true);
     setReflectionStage("draft");
     const context = `Contexte patrimoine de Roxane (chiffres actuels):
-- Épargne — Livret A: ${fmt(inputs.savings.livretA.balance)}, PEL: ${fmt(inputs.savings.pel.balance)}, ISA (Plum): ${fmt(inputs.savings.isaPlum.balance)}
-- AV (Linxea) — ETF: ${fmt(inputs.etf.current)} actuel, ${fmt(inputs.etf.planned)} prévu (${inputs.etf.plannedDate}), Moneyfarm: ${fmt(inputs.moneyfarm.balance)}
-- Pension (Standard Life, Trust Based): ${fmt(inputs.pension.balance)}
-- SCPI: ${fmt(inputs.scpi.invested)}
-- Immobilier actuel: ${fmt(inputs.reCurrent.value)}, emprunt ${fmt(inputs.reCurrent.loanPrincipal)}
-- Scénario futur immobilier: ${inputs.reFuture.enabled ? fmt(inputs.reFuture.price) : "désactivé"}
+- Épargne — Livret A: ${fmt(inputs.savings.livretA.balance)} (taux ${pct(inputs.savings.livretA.rate)}), PEL: ${fmt(inputs.savings.pel.balance)} (taux ${pct(inputs.savings.pel.rate)}), ISA (Plum): ${fmt(inputs.savings.isaPlum.balance)} (AER ${pct(inputs.savings.isaPlum.rate)})
+- AV (Linxea) — ETF: ${fmt(inputs.etf.current)} actuel (rendement attendu ${pct(inputs.etf.expectedReturn)}), ${fmt(inputs.etf.planned)} prévu (${inputs.etf.plannedDate}), Moneyfarm: ${fmt(inputs.moneyfarm.balance)} (rendement attendu ${pct(inputs.moneyfarm.expectedReturn)})
+- Pension (Standard Life, Trust Based): ${fmt(inputs.pension.balance)} (rendement estimé ${pct(inputs.pension.rate)})
+- SCPI: ${fmt(inputs.scpi.invested)} (rendement attendu ${pct(inputs.scpi.expectedReturn)})
+- Immobilier actuel: ${fmt(inputs.reCurrent.value)}, emprunt ${fmt(inputs.reCurrent.loanPrincipal)} (taux ${pct(inputs.reCurrent.loanRate)}, durée ${inputs.reCurrent.loanTermYears} ans)
+- Scénario futur immobilier: ${inputs.reFuture.enabled ? `${fmt(inputs.reFuture.price)} (apport ${fmt(inputs.reFuture.downPayment)}, taux ${pct(inputs.reFuture.loanRate)}, achat prévu ${inputs.reFuture.startYear})` : "désactivé"}
 - Total investi (${includeFuture ? "avec" : "sans"} futur): ${fmt(totals.invested)}
 - Valeur totale: ${fmt(totals.value)}
 - Emprunté: ${fmt(totals.borrowed)}
