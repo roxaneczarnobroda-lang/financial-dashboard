@@ -21,15 +21,15 @@ const pct = (n) => `${((n || 0) * 100).toFixed(2)}%`;
 const DEFAULT_INPUTS = {
   trackingStart: new Date().toISOString().slice(0, 10),
   savings: {
-    livretA: { balance: 25000, rate: 0.015 },
+    livretA: { balance: 25000, rate: 0.015, monthlyContribution: 0 },
     // Placeholder rate — PEL rates are locked in at account opening and vary by
     // vintage, so this can't be looked up. Replace with your actual contract rate.
-    pel: { balance: 61000, rate: 0.015 },
-    isaPlum: { balance: 24419, rate: 0.027 }, // £20,770 AER 2.7%
+    pel: { balance: 61000, rate: 0.015, monthlyContribution: 0 },
+    isaPlum: { balance: 24419, rate: 0.027, monthlyContribution: 0 }, // £20,770 AER 2.7%
   },
-  etf: { current: 500, planned: 50000, plannedDate: "2026-09", expectedReturn: 0.07, volatility: 0.15 },
-  moneyfarm: { balance: 17636, expectedReturn: 0.0378, volatility: 0.12 }, // £15,000
-  pension: { balance: 77172, rate: 0.05, volatility: 0.1 }, // £65,639, rate is a rough estimate, see note below
+  etf: { current: 500, planned: 50000, plannedDate: "2026-09", expectedReturn: 0.07, volatility: 0.15, monthlyContribution: 0 },
+  moneyfarm: { balance: 17636, expectedReturn: 0.0378, volatility: 0.12, monthlyContribution: 0 }, // £15,000
+  pension: { balance: 77172, rate: 0.05, volatility: 0.1, monthlyContribution: 0 }, // £65,639, rate is a rough estimate, see note below
   // 2025 distribution rates looked up per fund; volatility is a rough guess by
   // risk profile (Reason is a newer, more aggressive fund; the other three are
   // more established), not sourced data.
@@ -38,13 +38,14 @@ const DEFAULT_INPUTS = {
     // figure for a fund created in 2024 (temporary cash deployment effects) —
     // not something to extrapolate 25 years forward. 7.5% used instead as a more
     // sustainable forward assumption; adjust as the fund matures.
-    reason: { balance: 35000, expectedReturn: 0.075, volatility: 0.08 },
-    edrEuropa: { balance: 35000, expectedReturn: 0.0875, volatility: 0.06 },
-    esicap: { balance: 41797.02, expectedReturn: 0.0701, volatility: 0.05 },
-    cristalLife: { balance: 42782.61, expectedReturn: 0.0654, volatility: 0.05 },
+    reason: { balance: 35000, expectedReturn: 0.075, volatility: 0.08, monthlyContribution: 0 },
+    edrEuropa: { balance: 35000, expectedReturn: 0.0875, volatility: 0.06, monthlyContribution: 0 },
+    esicap: { balance: 41797.02, expectedReturn: 0.0701, volatility: 0.05, monthlyContribution: 0 },
+    cristalLife: { balance: 42782.61, expectedReturn: 0.0654, volatility: 0.05, monthlyContribution: 0 },
   },
   reCurrent: { value: 0, loanPrincipal: 0, loanRate: 0.035, loanTermYears: 20 },
   reFuture: { enabled: false, price: 0, downPayment: 0, loanRate: 0.035, loanTermYears: 20, startYear: new Date().getFullYear() + 1 },
+  goal: { targetAmount: 0, targetYear: new Date().getFullYear() + 10 },
 };
 
 // Recursively fills in any key missing from `saved` with the value from
@@ -244,19 +245,19 @@ function runMonteCarlo(inputs, years, includeFuture, sims = 500) {
   const reFutureOffset = Math.max(0, inputs.reFuture.startYear - currentYear);
 
   const assets = [];
-  if (inputs.savings.livretA.balance > 0) assets.push({ v: inputs.savings.livretA.balance, r: inputs.savings.livretA.rate, vol: 0.001, startOffset: 0 });
-  if (inputs.savings.pel.balance > 0) assets.push({ v: inputs.savings.pel.balance, r: inputs.savings.pel.rate, vol: 0.001, startOffset: 0 });
-  if (inputs.savings.isaPlum.balance > 0) assets.push({ v: inputs.savings.isaPlum.balance, r: inputs.savings.isaPlum.rate, vol: 0.001, startOffset: 0 });
-  if (inputs.etf.current > 0) assets.push({ v: inputs.etf.current, r: inputs.etf.expectedReturn, vol: inputs.etf.volatility, startOffset: 0 });
-  if (includeFuture && inputs.etf.planned > 0) assets.push({ v: inputs.etf.planned, r: inputs.etf.expectedReturn, vol: inputs.etf.volatility, startOffset: 0 });
-  if (inputs.moneyfarm.balance > 0) assets.push({ v: inputs.moneyfarm.balance, r: inputs.moneyfarm.expectedReturn, vol: inputs.moneyfarm.volatility, startOffset: 0 });
-  if (inputs.pension.balance > 0) assets.push({ v: inputs.pension.balance, r: inputs.pension.rate, vol: inputs.pension.volatility, startOffset: 0 });
+  if (inputs.savings.livretA.balance > 0) assets.push({ v: inputs.savings.livretA.balance, r: inputs.savings.livretA.rate, vol: 0.001, startOffset: 0, contribution: (inputs.savings.livretA.monthlyContribution || 0) * 12 });
+  if (inputs.savings.pel.balance > 0) assets.push({ v: inputs.savings.pel.balance, r: inputs.savings.pel.rate, vol: 0.001, startOffset: 0, contribution: (inputs.savings.pel.monthlyContribution || 0) * 12 });
+  if (inputs.savings.isaPlum.balance > 0) assets.push({ v: inputs.savings.isaPlum.balance, r: inputs.savings.isaPlum.rate, vol: 0.001, startOffset: 0, contribution: (inputs.savings.isaPlum.monthlyContribution || 0) * 12 });
+  if (inputs.etf.current > 0) assets.push({ v: inputs.etf.current, r: inputs.etf.expectedReturn, vol: inputs.etf.volatility, startOffset: 0, contribution: (inputs.etf.monthlyContribution || 0) * 12 });
+  if (includeFuture && inputs.etf.planned > 0) assets.push({ v: inputs.etf.planned, r: inputs.etf.expectedReturn, vol: inputs.etf.volatility, startOffset: 0, contribution: 0 });
+  if (inputs.moneyfarm.balance > 0) assets.push({ v: inputs.moneyfarm.balance, r: inputs.moneyfarm.expectedReturn, vol: inputs.moneyfarm.volatility, startOffset: 0, contribution: (inputs.moneyfarm.monthlyContribution || 0) * 12 });
+  if (inputs.pension.balance > 0) assets.push({ v: inputs.pension.balance, r: inputs.pension.rate, vol: inputs.pension.volatility, startOffset: 0, contribution: (inputs.pension.monthlyContribution || 0) * 12 });
   for (const fund of Object.values(inputs.scpi)) {
-    if (fund.balance > 0) assets.push({ v: fund.balance, r: fund.expectedReturn, vol: fund.volatility, startOffset: 0 });
+    if (fund.balance > 0) assets.push({ v: fund.balance, r: fund.expectedReturn, vol: fund.volatility, startOffset: 0, contribution: (fund.monthlyContribution || 0) * 12 });
   }
-  if (inputs.reCurrent.value > 0) assets.push({ v: inputs.reCurrent.value, r: 0.02, vol: 0.06, startOffset: 0 });
+  if (inputs.reCurrent.value > 0) assets.push({ v: inputs.reCurrent.value, r: 0.02, vol: 0.06, startOffset: 0, contribution: 0 });
   if (includeFuture && inputs.reFuture.enabled && inputs.reFuture.price > 0) {
-    assets.push({ v: inputs.reFuture.price, r: 0.02, vol: 0.06, startOffset: reFutureOffset });
+    assets.push({ v: inputs.reFuture.price, r: 0.02, vol: 0.06, startOffset: reFutureOffset, contribution: 0 });
   }
 
   if (assets.length === 0) return [];
@@ -284,9 +285,14 @@ function runMonteCarlo(inputs, years, includeFuture, sims = 500) {
 
   // Lognormal shock keeps values positive and compounds correctly, unlike a plain
   // arithmetic shock which can drive an asset negative in one bad draw and then
-  // oscillate nonsensically from there.
+  // oscillate nonsensically from there. a.r is a simple annual rate (what "taux
+  // annuel" means everywhere in the UI), so it's converted to its equivalent
+  // continuously-compounded log-return here — otherwise, at zero volatility,
+  // this would compound as exp(r) per year instead of (1+r), silently
+  // overstating growth (more so for higher rates over longer horizons).
   function shock(a) {
-    return Math.exp(a.r - (a.vol * a.vol) / 2 + a.vol * gauss());
+    const logReturn = Math.log(1 + a.r);
+    return Math.exp(logReturn - (a.vol * a.vol) / 2 + a.vol * gauss());
   }
 
   const paths = [];
@@ -298,7 +304,8 @@ function runMonteCarlo(inputs, years, includeFuture, sims = 500) {
       vals = vals.map((v, i) => {
         const a = assets[i];
         if (v === null) return y === a.startOffset ? a.v : null;
-        return v * shock(a);
+        // Contribution credited at the start of the year, so it gets a full year of growth.
+        return (v + a.contribution) * shock(a);
       });
       yearly.push(vals.reduce((sum, v) => sum + (v || 0), 0));
     }
@@ -316,6 +323,48 @@ function runMonteCarlo(inputs, years, includeFuture, sims = 500) {
     });
   }
   return result;
+}
+
+function blendedReturnRate(inputs) {
+  let weightedSum = 0, totalWeight = 0;
+  const add = (balance, rate) => {
+    if (balance > 0) { weightedSum += balance * rate; totalWeight += balance; }
+  };
+  add(inputs.savings.livretA.balance, inputs.savings.livretA.rate);
+  add(inputs.savings.pel.balance, inputs.savings.pel.rate);
+  add(inputs.savings.isaPlum.balance, inputs.savings.isaPlum.rate);
+  add(inputs.etf.current, inputs.etf.expectedReturn);
+  add(inputs.moneyfarm.balance, inputs.moneyfarm.expectedReturn);
+  add(inputs.pension.balance, inputs.pension.rate);
+  for (const fund of Object.values(inputs.scpi)) add(fund.balance, fund.expectedReturn);
+  add(inputs.reCurrent.value, 0.02);
+  return totalWeight > 0 ? weightedSum / totalWeight : 0;
+}
+
+// A diagnostic planning number, deliberately kept separate from the Monte Carlo
+// bands: "how much more would I need to contribute monthly to hit this target,"
+// using one blended average return across current holdings rather than a
+// probabilistic simulation — closer to what a standard retirement calculator
+// gives you than a percentile range. The baseline (what happens with the
+// contributions already set in "Vue d'ensemble") still comes from the real
+// Monte Carlo engine, so debt amortization and asset phase-in aren't duplicated.
+function computeGoalPlan(inputs, includeFuture) {
+  const currentYear = new Date().getFullYear();
+  const n = inputs.goal.targetYear - currentYear;
+  if (!inputs.goal.targetAmount || inputs.goal.targetAmount <= 0 || n <= 0) return null;
+
+  const mc = runMonteCarlo(inputs, n, includeFuture, 500);
+  if (mc.length === 0) return null;
+  const baselineNet = mc[mc.length - 1].p50;
+  const gap = inputs.goal.targetAmount - baselineNet;
+
+  if (gap <= 0) {
+    return { n, baselineNet, gap, additionalMonthly: 0, onTrack: true };
+  }
+
+  const r = blendedReturnRate(inputs);
+  const additionalAnnual = r > 0.0005 ? (gap * r) / (Math.pow(1 + r, n) - 1) : gap / n;
+  return { n, baselineNet, gap, additionalMonthly: additionalAnnual / 12, onTrack: false, blendedRate: r };
 }
 
 function Toggle({ checked, onChange, label }) {
@@ -363,6 +412,7 @@ export default function FinancialDashboard() {
   const totals = useMemo(() => computeTotals(inputs, includeFuture), [inputs, includeFuture]);
   const alloc = useMemo(() => allocationData(inputs, includeFuture), [inputs, includeFuture]);
   const mc = useMemo(() => runMonteCarlo(inputs, horizon, includeFuture), [inputs, horizon, includeFuture]);
+  const goalPlan = useMemo(() => computeGoalPlan(inputs, includeFuture), [inputs, includeFuture]);
 
   const saveSnapshot = async () => {
     const snap = { date: new Date().toISOString().slice(0, 10), invested: totals.invested, value: totals.value, borrowed: totals.borrowed };
@@ -390,6 +440,37 @@ export default function FinancialDashboard() {
     setChatInput("");
     setChatLoading(true);
     setReflectionStage("draft");
+
+    const contributionLines = [
+      ["Livret A", inputs.savings.livretA.monthlyContribution],
+      ["PEL", inputs.savings.pel.monthlyContribution],
+      ["ISA Plum", inputs.savings.isaPlum.monthlyContribution],
+      ["ETF Linxea", inputs.etf.monthlyContribution],
+      ["Moneyfarm", inputs.moneyfarm.monthlyContribution],
+      ["SCPI Reason", inputs.scpi.reason.monthlyContribution],
+      ["SCPI EDR Europa", inputs.scpi.edrEuropa.monthlyContribution],
+      ["SCPI ESICAP", inputs.scpi.esicap.monthlyContribution],
+      ["SCPI Cristal Life", inputs.scpi.cristalLife.monthlyContribution],
+      ["Pension", inputs.pension.monthlyContribution],
+    ]
+      .filter(([, amount]) => amount > 0)
+      .map(([label, amount]) => `${label} ${fmt(amount)}/mois`)
+      .join(", ");
+
+    // Same breakdown the pie charts on "Répartition" use — previously computed
+    // but never sent here, which is why the AI used to decline risk/allocation
+    // questions it could actually have answered.
+    const allocSum = alloc.byClass.reduce((s, d) => s + d.value, 0) || 1;
+    const allocLine = alloc.byClass.map((d) => `${d.name} ${pct(d.value / allocSum)}`).join(", ");
+    const liquidityLine = alloc.byLiquidity.map((d) => `${d.name} ${pct(d.value / allocSum)}`).join(", ");
+    const riskLine = alloc.byRisk.map((d) => `${d.name} ${pct(d.value / allocSum)}`).join(", ");
+
+    const goalLine = !goalPlan
+      ? "Objectif: aucun défini"
+      : goalPlan.onTrack
+      ? `Objectif: ${fmt(inputs.goal.targetAmount)} en ${inputs.goal.targetYear} — trajectoire actuelle: ${fmt(goalPlan.baselineNet)} (marge de ${fmt(Math.abs(goalPlan.gap))})`
+      : `Objectif: ${fmt(inputs.goal.targetAmount)} en ${inputs.goal.targetYear} — trajectoire actuelle: ${fmt(goalPlan.baselineNet)} (écart de ${fmt(goalPlan.gap)}), contribution mensuelle supplémentaire estimée: ${fmt(goalPlan.additionalMonthly)} (hypothèse: rendement moyen pondéré ${pct(goalPlan.blendedRate)} sur le patrimoine actuel)`;
+
     const context = `Contexte patrimoine de Roxane (chiffres actuels):
 - Épargne — Livret A: ${fmt(inputs.savings.livretA.balance)} (taux ${pct(inputs.savings.livretA.rate)}), PEL: ${fmt(inputs.savings.pel.balance)} (taux ${pct(inputs.savings.pel.rate)}), ISA (Plum): ${fmt(inputs.savings.isaPlum.balance)} (AER ${pct(inputs.savings.isaPlum.rate)})
 - AV (Linxea) — ETF: ${fmt(inputs.etf.current)} actuel (rendement attendu ${pct(inputs.etf.expectedReturn)}), ${fmt(inputs.etf.planned)} prévu (${inputs.etf.plannedDate}), Moneyfarm: ${fmt(inputs.moneyfarm.balance)} (rendement attendu ${pct(inputs.moneyfarm.expectedReturn)})
@@ -397,6 +478,11 @@ export default function FinancialDashboard() {
 - SCPI — Reason: ${fmt(inputs.scpi.reason.balance)} (${pct(inputs.scpi.reason.expectedReturn)}), EDR Europa: ${fmt(inputs.scpi.edrEuropa.balance)} (${pct(inputs.scpi.edrEuropa.expectedReturn)}), ESICAP REIM: ${fmt(inputs.scpi.esicap.balance)} (${pct(inputs.scpi.esicap.expectedReturn)}), Cristal Life: ${fmt(inputs.scpi.cristalLife.balance)} (${pct(inputs.scpi.cristalLife.expectedReturn)})
 - Immobilier actuel: ${fmt(inputs.reCurrent.value)}, emprunt ${fmt(inputs.reCurrent.loanPrincipal)} (taux ${pct(inputs.reCurrent.loanRate)}, durée ${inputs.reCurrent.loanTermYears} ans)
 - Scénario futur immobilier: ${inputs.reFuture.enabled ? `${fmt(inputs.reFuture.price)} (apport ${fmt(inputs.reFuture.downPayment)}, taux ${pct(inputs.reFuture.loanRate)}, achat prévu ${inputs.reFuture.startYear})` : "désactivé"}
+- Contributions mensuelles en cours: ${contributionLines || "aucune"}
+- Répartition par classe d'actif: ${allocLine}
+- Répartition par liquidité: ${liquidityLine}
+- Répartition par niveau de risque: ${riskLine}
+- ${goalLine}
 - Total investi (${includeFuture ? "avec" : "sans"} futur): ${fmt(totals.invested)}
 - Valeur totale: ${fmt(totals.value)}
 - Emprunté: ${fmt(totals.borrowed)}
@@ -441,6 +527,7 @@ Réponds en français, de façon concise et factuelle, basé uniquement sur ces 
     { id: "dashboard", label: "Répartition" },
     { id: "history", label: "Historique" },
     { id: "predictions", label: "Projections" },
+    { id: "goals", label: "Objectifs" },
     { id: "counselor", label: "Conseiller IA" },
   ];
 
@@ -497,21 +584,24 @@ Réponds en français, de façon concise et factuelle, basé uniquement sur ces 
               <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>Épargne</div>
 
               <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>Livret A</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
                 <Field label="Solde" value={inputs.savings.livretA.balance} onChange={(v) => set("savings.livretA.balance", v)} suffix="€" />
                 <Field label="Taux annuel" value={inputs.savings.livretA.rate} onChange={(v) => set("savings.livretA.rate", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.savings.livretA.monthlyContribution} onChange={(v) => set("savings.livretA.monthlyContribution", v)} suffix="€/mois" />
               </div>
 
               <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>PEL</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
                 <Field label="Solde" value={inputs.savings.pel.balance} onChange={(v) => set("savings.pel.balance", v)} suffix="€" />
                 <Field label="Taux annuel" value={inputs.savings.pel.rate} onChange={(v) => set("savings.pel.rate", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.savings.pel.monthlyContribution} onChange={(v) => set("savings.pel.monthlyContribution", v)} suffix="€/mois" />
               </div>
 
               <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>ISA (Plum)</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                 <Field label="Solde" value={inputs.savings.isaPlum.balance} onChange={(v) => set("savings.isaPlum.balance", v)} suffix="€" />
                 <Field label="Taux annuel (AER)" value={inputs.savings.isaPlum.rate} onChange={(v) => set("savings.isaPlum.rate", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.savings.isaPlum.monthlyContribution} onChange={(v) => set("savings.isaPlum.monthlyContribution", v)} suffix="€/mois" />
               </div>
             </Card>
 
@@ -519,26 +609,29 @@ Réponds en français, de façon concise et factuelle, basé uniquement sur ces 
               <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>AV (Linxea)</div>
 
               <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>ETF</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
                 <Field label="Montant actuel" value={inputs.etf.current} onChange={(v) => set("etf.current", v)} suffix="€" />
                 <Field label="Montant prévu" value={inputs.etf.planned} onChange={(v) => set("etf.planned", v)} suffix="€" />
                 <Field label="Date prévue" type="text" value={inputs.etf.plannedDate} onChange={(v) => set("etf.plannedDate", v)} />
                 <Field label="Rendement attendu" value={inputs.etf.expectedReturn} onChange={(v) => set("etf.expectedReturn", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.etf.monthlyContribution} onChange={(v) => set("etf.monthlyContribution", v)} suffix="€/mois" />
               </div>
 
               <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>Moneyfarm</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                 <Field label="Montant" value={inputs.moneyfarm.balance} onChange={(v) => set("moneyfarm.balance", v)} suffix="€" />
                 <Field label="Rendement attendu" value={inputs.moneyfarm.expectedReturn} onChange={(v) => set("moneyfarm.expectedReturn", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.moneyfarm.monthlyContribution} onChange={(v) => set("moneyfarm.monthlyContribution", v)} suffix="€/mois" />
               </div>
             </Card>
 
             <Card style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>Pension</div>
               <div style={{ fontSize: 12, color: INK_SOFT, marginBottom: 12 }}>Standard Life — Trust Based Pension</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                 <Field label="Solde" value={inputs.pension.balance} onChange={(v) => set("pension.balance", v)} suffix="€" />
                 <Field label="Rendement attendu (estimation)" value={inputs.pension.rate} onChange={(v) => set("pension.rate", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.pension.monthlyContribution} onChange={(v) => set("pension.monthlyContribution", v)} suffix="€/mois" />
               </div>
             </Card>
 
@@ -546,27 +639,31 @@ Réponds en français, de façon concise et factuelle, basé uniquement sur ces 
               <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>SCPI</div>
 
               <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>Reason</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
                 <Field label="Montant" value={inputs.scpi.reason.balance} onChange={(v) => set("scpi.reason.balance", v)} suffix="€" />
                 <Field label="Rendement attendu" value={inputs.scpi.reason.expectedReturn} onChange={(v) => set("scpi.reason.expectedReturn", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.scpi.reason.monthlyContribution} onChange={(v) => set("scpi.reason.monthlyContribution", v)} suffix="€/mois" />
               </div>
 
               <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>EDR Europa</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
                 <Field label="Montant" value={inputs.scpi.edrEuropa.balance} onChange={(v) => set("scpi.edrEuropa.balance", v)} suffix="€" />
                 <Field label="Rendement attendu" value={inputs.scpi.edrEuropa.expectedReturn} onChange={(v) => set("scpi.edrEuropa.expectedReturn", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.scpi.edrEuropa.monthlyContribution} onChange={(v) => set("scpi.edrEuropa.monthlyContribution", v)} suffix="€/mois" />
               </div>
 
               <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>ESICAP REIM</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
                 <Field label="Montant" value={inputs.scpi.esicap.balance} onChange={(v) => set("scpi.esicap.balance", v)} suffix="€" />
                 <Field label="Rendement attendu" value={inputs.scpi.esicap.expectedReturn} onChange={(v) => set("scpi.esicap.expectedReturn", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.scpi.esicap.monthlyContribution} onChange={(v) => set("scpi.esicap.monthlyContribution", v)} suffix="€/mois" />
               </div>
 
               <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>Cristal Life (Inter Gestion)</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                 <Field label="Montant" value={inputs.scpi.cristalLife.balance} onChange={(v) => set("scpi.cristalLife.balance", v)} suffix="€" />
                 <Field label="Rendement attendu" value={inputs.scpi.cristalLife.expectedReturn} onChange={(v) => set("scpi.cristalLife.expectedReturn", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.scpi.cristalLife.monthlyContribution} onChange={(v) => set("scpi.cristalLife.monthlyContribution", v)} suffix="€/mois" />
               </div>
             </Card>
 
@@ -669,6 +766,54 @@ Réponds en français, de façon concise et factuelle, basé uniquement sur ces 
               </ResponsiveContainer>
             )}
           </Card>
+        )}
+
+        {tab === "goals" && (
+          <div>
+            <Card style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>Objectif</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <Field label="Montant visé" value={inputs.goal.targetAmount} onChange={(v) => set("goal.targetAmount", v)} suffix="€" />
+                <Field label="Année cible" value={inputs.goal.targetYear} onChange={(v) => set("goal.targetYear", v)} />
+              </div>
+            </Card>
+
+            {!goalPlan ? (
+              <Card>
+                <div style={{ fontSize: 13, color: INK_SOFT, padding: "24px 0", textAlign: "center" }}>
+                  Renseigne un montant visé et une année cible (dans le futur) pour voir ce qu'il faudrait épargner en plus.
+                </div>
+              </Card>
+            ) : (
+              <div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
+                  <Card>
+                    <div style={{ fontSize: 12, color: INK_SOFT, marginBottom: 6 }}>Trajectoire actuelle en {inputs.goal.targetYear}</div>
+                    <div style={{ fontFamily: "IBM Plex Mono, monospace", fontSize: 20, color: INK }}>{fmt(goalPlan.baselineNet)}</div>
+                  </Card>
+                  <Card>
+                    <div style={{ fontSize: 12, color: INK_SOFT, marginBottom: 6 }}>{goalPlan.onTrack ? "Marge au-dessus de l'objectif" : "Écart avec l'objectif"}</div>
+                    <div style={{ fontFamily: "IBM Plex Mono, monospace", fontSize: 20, color: goalPlan.onTrack ? TEAL : CLAY }}>
+                      {fmt(Math.abs(goalPlan.gap))}
+                    </div>
+                  </Card>
+                  <Card>
+                    <div style={{ fontSize: 12, color: INK_SOFT, marginBottom: 6 }}>Contribution mensuelle supplémentaire nécessaire</div>
+                    <div style={{ fontFamily: "IBM Plex Mono, monospace", fontSize: 20, color: GOLD }}>
+                      {goalPlan.onTrack ? "Aucune" : fmt(goalPlan.additionalMonthly)}
+                    </div>
+                  </Card>
+                </div>
+                <Card>
+                  <div style={{ fontSize: 12, color: INK_SOFT }}>
+                    {goalPlan.onTrack
+                      ? `À la trajectoire actuelle (contributions déjà renseignées comprises), tu dépasserais ton objectif de ${fmt(Math.abs(goalPlan.gap))} en ${inputs.goal.targetYear}.`
+                      : `Basé sur un rendement moyen pondéré de ${pct(goalPlan.blendedRate)} sur ton patrimoine actuel — une hypothèse simplifiée et déterministe, distincte des bandes de probabilité de l'onglet Projections. Demande au Conseiller IA où placer cette contribution supplémentaire.`}
+                  </div>
+                </Card>
+              </div>
+            )}
+          </div>
         )}
 
         {tab === "counselor" && (
