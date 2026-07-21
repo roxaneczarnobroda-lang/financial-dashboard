@@ -34,7 +34,11 @@ const DEFAULT_INPUTS = {
   // risk profile (Reason is a newer, more aggressive fund; the other three are
   // more established), not sourced data.
   scpi: {
-    reason: { balance: 35000, expectedReturn: 0.129, volatility: 0.08 },
+    // Reason's actual 2025 distribution rate was 12.9%, but that's a launch-phase
+    // figure for a fund created in 2024 (temporary cash deployment effects) —
+    // not something to extrapolate 25 years forward. 7.5% used instead as a more
+    // sustainable forward assumption; adjust as the fund matures.
+    reason: { balance: 35000, expectedReturn: 0.075, volatility: 0.08 },
     edrEuropa: { balance: 35000, expectedReturn: 0.0875, volatility: 0.06 },
     esicap: { balance: 41797.02, expectedReturn: 0.0701, volatility: 0.05 },
     cristalLife: { balance: 42782.61, expectedReturn: 0.0654, volatility: 0.05 },
