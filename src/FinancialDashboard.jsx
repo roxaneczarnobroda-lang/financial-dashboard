@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, ComposedChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { storage } from "./storage.js";
 
 const INK = "#1B2430";
@@ -385,6 +387,25 @@ function Toggle({ checked, onChange, label }) {
     </label>
   );
 }
+
+// Chat messages come back as markdown (bold, tables) from the AI; without this
+// they render as literal "**text**" and "| a | b |" — every element here needs
+// its own style since the app has no stylesheet, only inline styles.
+const markdownComponents = {
+  p: ({ children }) => <p style={{ margin: "0 0 8px" }}>{children}</p>,
+  strong: ({ children }) => <strong style={{ fontWeight: 700 }}>{children}</strong>,
+  em: ({ children }) => <em>{children}</em>,
+  ul: ({ children }) => <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>{children}</ul>,
+  ol: ({ children }) => <ol style={{ margin: "0 0 8px", paddingLeft: 18 }}>{children}</ol>,
+  li: ({ children }) => <li style={{ marginBottom: 2 }}>{children}</li>,
+  table: ({ children }) => (
+    <div style={{ overflowX: "auto", margin: "4px 0 8px" }}>
+      <table style={{ borderCollapse: "collapse", fontSize: 12, width: "100%" }}>{children}</table>
+    </div>
+  ),
+  th: ({ children }) => <th style={{ border: `1px solid ${BORDER}`, padding: "4px 8px", textAlign: "left" }}>{children}</th>,
+  td: ({ children }) => <td style={{ border: `1px solid ${BORDER}`, padding: "4px 8px" }}>{children}</td>,
+};
 
 export default function FinancialDashboard() {
   const [inputs, saveInputs, loaded] = useStoredInputs();
@@ -825,7 +846,9 @@ Réponds en français, de façon concise et factuelle, basé uniquement sur ces 
                     background: m.role === "user" ? INK : SAND,
                     color: m.role === "user" ? "#fff" : INK,
                     padding: "8px 12px", borderRadius: 10, fontSize: 13, lineHeight: 1.5
-                  }}>{m.content}</div>
+                  }}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{m.content}</ReactMarkdown>
+                  </div>
                   {m.draft && <div style={{ fontSize: 10, color: INK_SOFT, marginTop: 3 }}>révisé après relecture</div>}
                 </div>
               ))}
