@@ -369,6 +369,22 @@ function computeGoalPlan(inputs, includeFuture) {
   return { n, baselineNet, gap, additionalMonthly: additionalAnnual / 12, onTrack: false, blendedRate: r };
 }
 
+// What the proactive researcher should check, built from actual current
+// holdings rather than hardcoded — so it stays accurate if funds change.
+function buildResearchContext(inputs) {
+  const lines = [
+    `Livret A: taux enregistré ${pct(inputs.savings.livretA.rate)}`,
+    `SCPI Reason: taux enregistré ${pct(inputs.scpi.reason.expectedReturn)}`,
+    `SCPI EDR Europa: taux enregistré ${pct(inputs.scpi.edrEuropa.expectedReturn)}`,
+    `SCPI ESICAP REIM: taux enregistré ${pct(inputs.scpi.esicap.expectedReturn)}`,
+    `SCPI Cristal Life (Inter Gestion REIM): taux enregistré ${pct(inputs.scpi.cristalLife.expectedReturn)}`,
+  ];
+  if (inputs.reFuture.enabled) {
+    lines.push(`Projet immobilier futur prévu en ${inputs.reFuture.startYear}, prix ${fmt(inputs.reFuture.price)}`);
+  }
+  return lines.join("\n");
+}
+
 function Toggle({ checked, onChange, label }) {
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, color: INK }}>
@@ -417,6 +433,8 @@ export default function FinancialDashboard() {
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [reflectionStage, setReflectionStage] = useState(null);
+  const [research, setResearch] = useState(null);
+  const [researchLoading, setResearchLoading] = useState(false);
   const chatEndRef = useRef(null);
 
   useEffect(() => {
@@ -424,6 +442,15 @@ export default function FinancialDashboard() {
       try {
         const r = await storage.get("fd-history");
         if (r?.value) setHistory(JSON.parse(r.value));
+      } catch (e) {}
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await storage.get("fd-research");
+        if (r?.value) setResearch(JSON.parse(r.value));
       } catch (e) {}
     })();
   }, []);
@@ -440,6 +467,27 @@ export default function FinancialDashboard() {
     const next = [...history.filter((h) => h.date !== snap.date), snap];
     setHistory(next);
     try { await storage.set("fd-history", JSON.stringify(next)); } catch (e) {}
+  };
+
+  // Proactive research pipeline, run only when explicitly requested — deliberately
+  // separate from "Actualiser" so that button stays instant and free.
+  const runResearch = async () => {
+    setResearchLoading(true);
+    try {
+      const response = await fetch("/api/research", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ context: buildResearchContext(inputs) }),
+      });
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+      const data = await response.json();
+      const next = { report: data.report, generatedAt: data.generatedAt };
+      setResearch(next);
+      try { await storage.set("fd-research", JSON.stringify(next)); } catch (e) {}
+    } catch (e) {
+      setResearch({ report: "Erreur lors de la recherche. Réessaie plus tard.", generatedAt: new Date().toISOString() });
+    }
+    setResearchLoading(false);
   };
 
   const set = (path, val) => {
@@ -492,6 +540,10 @@ export default function FinancialDashboard() {
       ? `Objectif: ${fmt(inputs.goal.targetAmount)} en ${inputs.goal.targetYear} — trajectoire actuelle: ${fmt(goalPlan.baselineNet)} (marge de ${fmt(Math.abs(goalPlan.gap))})`
       : `Objectif: ${fmt(inputs.goal.targetAmount)} en ${inputs.goal.targetYear} — trajectoire actuelle: ${fmt(goalPlan.baselineNet)} (écart de ${fmt(goalPlan.gap)}), contribution mensuelle supplémentaire estimée: ${fmt(goalPlan.additionalMonthly)} (hypothèse: rendement moyen pondéré ${pct(goalPlan.blendedRate)} sur le patrimoine actuel)`;
 
+    const researchBlock = research
+      ? `Dernière vérification web (${new Date(research.generatedAt).toLocaleDateString("fr-FR")}):\n${research.report}`
+      : "Aucune vérification web n'a encore été effectuée (onglet Recherche).";
+
     const context = `Contexte patrimoine de Roxane (chiffres actuels):
 - Épargne — Livret A: ${fmt(inputs.savings.livretA.balance)} (taux ${pct(inputs.savings.livretA.rate)}), PEL: ${fmt(inputs.savings.pel.balance)} (taux ${pct(inputs.savings.pel.rate)}), ISA (Plum): ${fmt(inputs.savings.isaPlum.balance)} (AER ${pct(inputs.savings.isaPlum.rate)})
 - AV (Linxea) — ETF: ${fmt(inputs.etf.current)} actuel (rendement attendu ${pct(inputs.etf.expectedReturn)}), ${fmt(inputs.etf.planned)} prévu (${inputs.etf.plannedDate}), Moneyfarm: ${fmt(inputs.moneyfarm.balance)} (rendement attendu ${pct(inputs.moneyfarm.expectedReturn)})
@@ -508,15 +560,20 @@ export default function FinancialDashboard() {
 - Valeur totale: ${fmt(totals.value)}
 - Emprunté: ${fmt(totals.borrowed)}
 - Net: ${fmt(totals.net)}
-Réponds en français, de façon concise et factuelle, basé uniquement sur ces chiffres. Précise quand une question dépasse ce contexte.`;
+
+${researchBlock}
+
+Réponds en français, de façon concise et factuelle, basé sur ces chiffres et la dernière vérification web ci-dessus. Si une question a vraiment besoin d'une info plus récente que ce qui est disponible ici, tu peux faire une recherche web ciblée (une ou deux requêtes maximum) — mais préfère toujours les données déjà fournies quand elles suffisent. Précise quand une question dépasse ce contexte.`;
     try {
       // Proxied through our own /api/chat serverless function, which holds the
-      // Anthropic API key server-side — the browser never sees it.
-      const callClaude = async (msgs, sys) => {
+      // Anthropic API key server-side — the browser never sees it. webSearch is
+      // only enabled for the draft step, as a fallback when the cached research
+      // above doesn't cover the question — the critique step never needs it.
+      const callClaude = async (msgs, sys, webSearch = false) => {
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ system: sys, messages: msgs }),
+          body: JSON.stringify({ system: sys, messages: msgs, webSearch }),
         });
         if (!response.ok) throw new Error(`API error: ${response.status}`);
         const data = await response.json();
@@ -524,7 +581,7 @@ Réponds en français, de façon concise et factuelle, basé uniquement sur ces 
       };
 
       // Step 1: draft
-      const draft = await callClaude(nextMessages.map((m) => ({ role: m.role, content: m.content })), context);
+      const draft = await callClaude(nextMessages.map((m) => ({ role: m.role, content: m.content })), context, true);
       setReflectionStage("critique");
 
       // Step 2: self-critique + revise in one call, checked against the same numeric context
@@ -549,6 +606,7 @@ Réponds en français, de façon concise et factuelle, basé uniquement sur ces 
     { id: "history", label: "Historique" },
     { id: "predictions", label: "Projections" },
     { id: "goals", label: "Objectifs" },
+    { id: "research", label: "Recherche" },
     { id: "counselor", label: "Conseiller IA" },
   ];
 
@@ -835,6 +893,39 @@ Réponds en français, de façon concise et factuelle, basé uniquement sur ces 
               </div>
             )}
           </div>
+        )}
+
+        {tab === "research" && (
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, flexWrap: "wrap", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 500 }}>Vérification des taux et tendances</div>
+                {research && (
+                  <div style={{ fontSize: 11, color: INK_SOFT, marginTop: 2 }}>
+                    Dernière vérification: {new Date(research.generatedAt).toLocaleString("fr-FR")}
+                  </div>
+                )}
+              </div>
+              <button onClick={runResearch} disabled={researchLoading} style={{
+                padding: "8px 14px", borderRadius: 8, border: `1px solid ${INK}`, background: INK, color: "#fff",
+                fontSize: 13, cursor: researchLoading ? "default" : "pointer", opacity: researchLoading ? 0.6 : 1
+              }}>
+                {researchLoading ? "Recherche en cours..." : "Vérifier les taux"}
+              </button>
+            </div>
+            <div style={{ fontSize: 12, color: INK_SOFT, marginBottom: 16 }}>
+              Cherche sur le web les taux actuels de tes 4 SCPI et du Livret A, les compare à ce qui est enregistré, et note les tendances générales pertinentes. Séparé du bouton "Actualiser" — celui-ci fait une vraie recherche, ça prend 20 à 40 secondes.
+            </div>
+            {!research ? (
+              <div style={{ fontSize: 13, color: INK_SOFT, padding: "24px 0", textAlign: "center" }}>
+                Aucune vérification effectuée. Clique sur "Vérifier les taux" pour lancer une recherche.
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{research.report}</ReactMarkdown>
+              </div>
+            )}
+          </Card>
         )}
 
         {tab === "counselor" && (
