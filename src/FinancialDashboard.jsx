@@ -14,6 +14,8 @@ const CLAY = "#B5533C";
 const SAND = "#E4DCC8";
 const BORDER = "#E5E0D4";
 const MAUVE = "#8B6F9E";
+const STEEL = "#5B7C99";
+const SAGE = "#7D8C6B";
 
 const fmt = (n) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n || 0);
 const pct = (n) => `${((n || 0) * 100).toFixed(2)}%`;
@@ -32,6 +34,8 @@ const DEFAULT_INPUTS = {
   etf: { current: 500, planned: 50000, plannedDate: "2026-09", expectedReturn: 0.07, volatility: 0.15, monthlyContribution: 0 },
   moneyfarm: { balance: 17636, expectedReturn: 0.0378, volatility: 0.12, monthlyContribution: 0 }, // £15,000
   pension: { balance: 77172, rate: 0.05, volatility: 0.1, monthlyContribution: 0 }, // £65,639, rate is a rough estimate, see note below
+  pea: { balance: 0, expectedReturn: 0.07, volatility: 0.15, monthlyContribution: 0 },
+  per: { balance: 0, expectedReturn: 0.05, volatility: 0.1, monthlyContribution: 0 },
   // 2025 distribution rates looked up per fund; volatility is a rough guess by
   // risk profile (Reason is a newer, more aggressive fund; the other three are
   // more established), not sourced data.
@@ -154,6 +158,8 @@ function computeTotals(inputs, includeFuture) {
   invested += inputs.etf.current; value += inputs.etf.current;
   invested += inputs.moneyfarm.balance; value += inputs.moneyfarm.balance;
   invested += inputs.pension.balance; value += inputs.pension.balance;
+  invested += inputs.pea.balance; value += inputs.pea.balance;
+  invested += inputs.per.balance; value += inputs.per.balance;
   const scpiAmt = scpiTotal(inputs);
   invested += scpiAmt; value += scpiAmt;
   invested += inputs.reCurrent.value; value += inputs.reCurrent.value;
@@ -178,25 +184,32 @@ function allocationData(inputs, includeFuture) {
   const reAmt = inputs.reCurrent.value + (includeFuture && inputs.reFuture.enabled ? inputs.reFuture.price : 0);
   const pensionAmt = inputs.pension.balance;
   const scpiAmt = scpiTotal(inputs);
+  const peaAmt = inputs.pea.balance;
+  const perAmt = inputs.per.balance;
 
   const byClass = [
     { name: "Épargne", value: savingsTotal, color: SAND },
     { name: "AV (Linxea)", value: avLinxeaAmt, color: GOLD },
+    { name: "PEA", value: peaAmt, color: STEEL },
     { name: "SCPI", value: scpiAmt, color: TEAL },
     { name: "Immobilier", value: reAmt, color: CLAY },
     { name: "Pension", value: pensionAmt, color: MAUVE },
+    { name: "PER", value: perAmt, color: SAGE },
   ].filter((d) => d.value > 0);
 
-  const liquid = savingsTotal + avLinxeaAmt;
-  const illiquid = scpiAmt + reAmt + pensionAmt;
+  // PEA is equity-based like AV Linxea (liquid in practice, despite tax-wrapper
+  // mechanics discouraging early withdrawal, same treatment as AV Linxea here).
+  // PER is locked until retirement like Pension — genuinely illiquid.
+  const liquid = savingsTotal + avLinxeaAmt + peaAmt;
+  const illiquid = scpiAmt + reAmt + pensionAmt + perAmt;
   const byLiquidity = [
     { name: "Liquide", value: liquid, color: GOLD },
     { name: "Illiquide", value: illiquid, color: TEAL },
   ].filter((d) => d.value > 0);
 
   const low = savingsTotal;
-  const mid = scpiAmt + pensionAmt;
-  const high = avLinxeaAmt + reAmt;
+  const mid = scpiAmt + pensionAmt + perAmt;
+  const high = avLinxeaAmt + reAmt + peaAmt;
   const byRisk = [
     { name: "Faible", value: low, color: TEAL },
     { name: "Moyen", value: mid, color: GOLD },
@@ -263,6 +276,8 @@ function runMonteCarlo(inputs, years, includeFuture, sims = 500) {
   if (includeFuture && inputs.etf.planned > 0) assets.push({ v: inputs.etf.planned, r: inputs.etf.expectedReturn, vol: inputs.etf.volatility, startOffset: 0, contribution: 0 });
   if (inputs.moneyfarm.balance > 0) assets.push({ v: inputs.moneyfarm.balance, r: inputs.moneyfarm.expectedReturn, vol: inputs.moneyfarm.volatility, startOffset: 0, contribution: (inputs.moneyfarm.monthlyContribution || 0) * 12 });
   if (inputs.pension.balance > 0) assets.push({ v: inputs.pension.balance, r: inputs.pension.rate, vol: inputs.pension.volatility, startOffset: 0, contribution: (inputs.pension.monthlyContribution || 0) * 12 });
+  if (inputs.pea.balance > 0) assets.push({ v: inputs.pea.balance, r: inputs.pea.expectedReturn, vol: inputs.pea.volatility, startOffset: 0, contribution: (inputs.pea.monthlyContribution || 0) * 12 });
+  if (inputs.per.balance > 0) assets.push({ v: inputs.per.balance, r: inputs.per.expectedReturn, vol: inputs.per.volatility, startOffset: 0, contribution: (inputs.per.monthlyContribution || 0) * 12 });
   for (const fund of Object.values(inputs.scpi)) {
     if (fund.balance > 0) assets.push({ v: fund.balance, r: fund.expectedReturn, vol: fund.volatility, startOffset: 0, contribution: (fund.monthlyContribution || 0) * 12 });
   }
@@ -347,6 +362,8 @@ function blendedReturnRate(inputs) {
   add(inputs.etf.current, inputs.etf.expectedReturn);
   add(inputs.moneyfarm.balance, inputs.moneyfarm.expectedReturn);
   add(inputs.pension.balance, inputs.pension.rate);
+  add(inputs.pea.balance, inputs.pea.expectedReturn);
+  add(inputs.per.balance, inputs.per.expectedReturn);
   for (const fund of Object.values(inputs.scpi)) add(fund.balance, fund.expectedReturn);
   add(inputs.reCurrent.value, realEstateTotalReturn(inputs.reCurrent));
   return totalWeight > 0 ? weightedSum / totalWeight : 0;
@@ -530,6 +547,8 @@ export default function FinancialDashboard() {
       ["SCPI ESICAP", inputs.scpi.esicap.monthlyContribution],
       ["SCPI Cristal Life", inputs.scpi.cristalLife.monthlyContribution],
       ["Pension", inputs.pension.monthlyContribution],
+      ["PEA", inputs.pea.monthlyContribution],
+      ["PER", inputs.per.monthlyContribution],
     ]
       .filter(([, amount]) => amount > 0)
       .map(([label, amount]) => `${label} ${fmt(amount)}/mois`)
@@ -557,6 +576,8 @@ export default function FinancialDashboard() {
 - Épargne — Livret A: ${fmt(inputs.savings.livretA.balance)} (taux ${pct(inputs.savings.livretA.rate)}), PEL: ${fmt(inputs.savings.pel.balance)} (taux ${pct(inputs.savings.pel.rate)}), ISA (Plum): ${fmt(inputs.savings.isaPlum.balance)} (AER ${pct(inputs.savings.isaPlum.rate)})
 - AV (Linxea) — ETF: ${fmt(inputs.etf.current)} actuel (rendement attendu ${pct(inputs.etf.expectedReturn)}), ${fmt(inputs.etf.planned)} prévu (${inputs.etf.plannedDate}), Moneyfarm: ${fmt(inputs.moneyfarm.balance)} (rendement attendu ${pct(inputs.moneyfarm.expectedReturn)})
 - Pension (Standard Life, Trust Based): ${fmt(inputs.pension.balance)} (rendement estimé ${pct(inputs.pension.rate)})
+- PEA: ${fmt(inputs.pea.balance)} (rendement attendu ${pct(inputs.pea.expectedReturn)})
+- PER: ${fmt(inputs.per.balance)} (rendement attendu ${pct(inputs.per.expectedReturn)})
 - SCPI — Reason: ${fmt(inputs.scpi.reason.balance)} (${pct(inputs.scpi.reason.expectedReturn)}), EDR Europa: ${fmt(inputs.scpi.edrEuropa.balance)} (${pct(inputs.scpi.edrEuropa.expectedReturn)}), ESICAP REIM: ${fmt(inputs.scpi.esicap.balance)} (${pct(inputs.scpi.esicap.expectedReturn)}), Cristal Life: ${fmt(inputs.scpi.cristalLife.balance)} (${pct(inputs.scpi.cristalLife.expectedReturn)})
 - Immobilier actuel: ${fmt(inputs.reCurrent.value)} (valorisation annuelle ${pct(inputs.reCurrent.expectedReturn)} + rendement locatif net ${pct(inputs.reCurrent.rentalYield)} = ${pct(realEstateTotalReturn(inputs.reCurrent))} au total), emprunt ${fmt(inputs.reCurrent.loanPrincipal)} (taux ${pct(inputs.reCurrent.loanRate)}, durée ${inputs.reCurrent.loanTermYears} ans)
 - Scénario futur immobilier: ${inputs.reFuture.enabled ? `${fmt(inputs.reFuture.price)} (valorisation annuelle ${pct(inputs.reFuture.expectedReturn)} + rendement locatif net ${pct(inputs.reFuture.rentalYield)} = ${pct(realEstateTotalReturn(inputs.reFuture))} au total, apport ${fmt(inputs.reFuture.downPayment)}, taux ${pct(inputs.reFuture.loanRate)}, achat prévu ${inputs.reFuture.startYear})` : "désactivé"}
@@ -714,12 +735,30 @@ Réponds en français, de façon concise et factuelle, basé sur ces chiffres et
             </Card>
 
             <Card style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>PEA</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                <Field label="Montant" value={inputs.pea.balance} onChange={(v) => set("pea.balance", v)} suffix="€" />
+                <Field label="Rendement attendu" value={inputs.pea.expectedReturn} onChange={(v) => set("pea.expectedReturn", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.pea.monthlyContribution} onChange={(v) => set("pea.monthlyContribution", v)} suffix="€/mois" />
+              </div>
+            </Card>
+
+            <Card style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>Pension</div>
               <div style={{ fontSize: 12, color: INK_SOFT, marginBottom: 12 }}>Standard Life — Trust Based Pension</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
                 <Field label="Solde" value={inputs.pension.balance} onChange={(v) => set("pension.balance", v)} suffix="€" />
                 <Field label="Rendement attendu (estimation)" value={inputs.pension.rate} onChange={(v) => set("pension.rate", v)} step="0.001" />
                 <Field label="Contribution mensuelle" value={inputs.pension.monthlyContribution} onChange={(v) => set("pension.monthlyContribution", v)} suffix="€/mois" />
+              </div>
+            </Card>
+
+            <Card style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 12 }}>PER</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                <Field label="Montant" value={inputs.per.balance} onChange={(v) => set("per.balance", v)} suffix="€" />
+                <Field label="Rendement attendu" value={inputs.per.expectedReturn} onChange={(v) => set("per.expectedReturn", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.per.monthlyContribution} onChange={(v) => set("per.monthlyContribution", v)} suffix="€/mois" />
               </div>
             </Card>
 
