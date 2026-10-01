@@ -30,6 +30,8 @@ const DEFAULT_INPUTS = {
     // vintage, so this can't be looked up. Replace with your actual contract rate.
     pel: { balance: 61000, rate: 0.015, monthlyContribution: 0 },
     isaPlum: { balance: 24419, rate: 0.027, monthlyContribution: 0 }, // £20,770 AER 2.7%
+    lloyds: { balance: 43501, rate: 0, monthlyContribution: 0 }, // £37,000 current account, no interest
+    boursorama: { balance: 22850, rate: 0.0105, monthlyContribution: 0 },
   },
   etf: { current: 500, planned: 50000, plannedDate: "2026-09", expectedReturn: 0.07, volatility: 0.15, monthlyContribution: 0 },
   moneyfarm: { balance: 17636, expectedReturn: 0.0378, volatility: 0.12, monthlyContribution: 0 }, // £15,000
@@ -146,6 +148,11 @@ function scpiTotal(inputs) {
   return inputs.scpi.reason.balance + inputs.scpi.edrEuropa.balance + inputs.scpi.esicap.balance + inputs.scpi.cristalLife.balance;
 }
 
+function savingsTotal(inputs) {
+  return inputs.savings.livretA.balance + inputs.savings.pel.balance + inputs.savings.isaPlum.balance
+    + inputs.savings.lloyds.balance + inputs.savings.boursorama.balance;
+}
+
 // Total return on a property = capital appreciation + net rental yield.
 function realEstateTotalReturn(re) {
   return re.expectedReturn + re.rentalYield;
@@ -153,8 +160,8 @@ function realEstateTotalReturn(re) {
 
 function computeTotals(inputs, includeFuture) {
   let invested = 0, borrowed = 0, value = 0;
-  const savingsTotal = inputs.savings.livretA.balance + inputs.savings.pel.balance + inputs.savings.isaPlum.balance;
-  invested += savingsTotal; value += savingsTotal;
+  const savingsAmt = savingsTotal(inputs);
+  invested += savingsAmt; value += savingsAmt;
   invested += inputs.etf.current; value += inputs.etf.current;
   invested += inputs.moneyfarm.balance; value += inputs.moneyfarm.balance;
   invested += inputs.pension.balance; value += inputs.pension.balance;
@@ -178,7 +185,7 @@ function computeTotals(inputs, includeFuture) {
 }
 
 function allocationData(inputs, includeFuture) {
-  const savingsTotal = inputs.savings.livretA.balance + inputs.savings.pel.balance + inputs.savings.isaPlum.balance;
+  const savingsAmt = savingsTotal(inputs);
   const etfAmt = inputs.etf.current + (includeFuture ? inputs.etf.planned : 0);
   const avLinxeaAmt = etfAmt + inputs.moneyfarm.balance;
   const reAmt = inputs.reCurrent.value + (includeFuture && inputs.reFuture.enabled ? inputs.reFuture.price : 0);
@@ -188,7 +195,7 @@ function allocationData(inputs, includeFuture) {
   const perAmt = inputs.per.balance;
 
   const byClass = [
-    { name: "Épargne", value: savingsTotal, color: SAND },
+    { name: "Épargne", value: savingsAmt, color: SAND },
     { name: "AV (Linxea)", value: avLinxeaAmt, color: GOLD },
     { name: "PEA", value: peaAmt, color: STEEL },
     { name: "SCPI", value: scpiAmt, color: TEAL },
@@ -200,14 +207,14 @@ function allocationData(inputs, includeFuture) {
   // PEA is equity-based like AV Linxea (liquid in practice, despite tax-wrapper
   // mechanics discouraging early withdrawal, same treatment as AV Linxea here).
   // PER is locked until retirement like Pension — genuinely illiquid.
-  const liquid = savingsTotal + avLinxeaAmt + peaAmt;
+  const liquid = savingsAmt + avLinxeaAmt + peaAmt;
   const illiquid = scpiAmt + reAmt + pensionAmt + perAmt;
   const byLiquidity = [
     { name: "Liquide", value: liquid, color: GOLD },
     { name: "Illiquide", value: illiquid, color: TEAL },
   ].filter((d) => d.value > 0);
 
-  const low = savingsTotal;
+  const low = savingsAmt;
   const mid = scpiAmt + pensionAmt + perAmt;
   const high = avLinxeaAmt + reAmt + peaAmt;
   const byRisk = [
@@ -272,6 +279,8 @@ function runMonteCarlo(inputs, years, includeFuture, sims = 500) {
   if (inputs.savings.livretA.balance > 0) assets.push({ v: inputs.savings.livretA.balance, r: inputs.savings.livretA.rate, vol: 0.001, startOffset: 0, contribution: (inputs.savings.livretA.monthlyContribution || 0) * 12 });
   if (inputs.savings.pel.balance > 0) assets.push({ v: inputs.savings.pel.balance, r: inputs.savings.pel.rate, vol: 0.001, startOffset: 0, contribution: (inputs.savings.pel.monthlyContribution || 0) * 12 });
   if (inputs.savings.isaPlum.balance > 0) assets.push({ v: inputs.savings.isaPlum.balance, r: inputs.savings.isaPlum.rate, vol: 0.001, startOffset: 0, contribution: (inputs.savings.isaPlum.monthlyContribution || 0) * 12 });
+  if (inputs.savings.lloyds.balance > 0) assets.push({ v: inputs.savings.lloyds.balance, r: inputs.savings.lloyds.rate, vol: 0.001, startOffset: 0, contribution: (inputs.savings.lloyds.monthlyContribution || 0) * 12 });
+  if (inputs.savings.boursorama.balance > 0) assets.push({ v: inputs.savings.boursorama.balance, r: inputs.savings.boursorama.rate, vol: 0.001, startOffset: 0, contribution: (inputs.savings.boursorama.monthlyContribution || 0) * 12 });
   if (inputs.etf.current > 0) assets.push({ v: inputs.etf.current, r: inputs.etf.expectedReturn, vol: inputs.etf.volatility, startOffset: 0, contribution: (inputs.etf.monthlyContribution || 0) * 12 });
   if (includeFuture && inputs.etf.planned > 0) assets.push({ v: inputs.etf.planned, r: inputs.etf.expectedReturn, vol: inputs.etf.volatility, startOffset: 0, contribution: 0 });
   if (inputs.moneyfarm.balance > 0) assets.push({ v: inputs.moneyfarm.balance, r: inputs.moneyfarm.expectedReturn, vol: inputs.moneyfarm.volatility, startOffset: 0, contribution: (inputs.moneyfarm.monthlyContribution || 0) * 12 });
@@ -359,6 +368,8 @@ function blendedReturnRate(inputs) {
   add(inputs.savings.livretA.balance, inputs.savings.livretA.rate);
   add(inputs.savings.pel.balance, inputs.savings.pel.rate);
   add(inputs.savings.isaPlum.balance, inputs.savings.isaPlum.rate);
+  add(inputs.savings.lloyds.balance, inputs.savings.lloyds.rate);
+  add(inputs.savings.boursorama.balance, inputs.savings.boursorama.rate);
   add(inputs.etf.current, inputs.etf.expectedReturn);
   add(inputs.moneyfarm.balance, inputs.moneyfarm.expectedReturn);
   add(inputs.pension.balance, inputs.pension.rate);
@@ -540,6 +551,8 @@ export default function FinancialDashboard() {
       ["Livret A", inputs.savings.livretA.monthlyContribution],
       ["PEL", inputs.savings.pel.monthlyContribution],
       ["ISA Plum", inputs.savings.isaPlum.monthlyContribution],
+      ["Lloyds", inputs.savings.lloyds.monthlyContribution],
+      ["Boursorama", inputs.savings.boursorama.monthlyContribution],
       ["ETF Linxea", inputs.etf.monthlyContribution],
       ["Moneyfarm", inputs.moneyfarm.monthlyContribution],
       ["SCPI Reason", inputs.scpi.reason.monthlyContribution],
@@ -573,7 +586,7 @@ export default function FinancialDashboard() {
       : "Aucune vérification web n'a encore été effectuée (onglet Recherche).";
 
     const context = `Contexte patrimoine de Roxane (chiffres actuels):
-- Épargne — Livret A: ${fmt(inputs.savings.livretA.balance)} (taux ${pct(inputs.savings.livretA.rate)}), PEL: ${fmt(inputs.savings.pel.balance)} (taux ${pct(inputs.savings.pel.rate)}), ISA (Plum): ${fmt(inputs.savings.isaPlum.balance)} (AER ${pct(inputs.savings.isaPlum.rate)})
+- Épargne — Livret A: ${fmt(inputs.savings.livretA.balance)} (taux ${pct(inputs.savings.livretA.rate)}), PEL: ${fmt(inputs.savings.pel.balance)} (taux ${pct(inputs.savings.pel.rate)}), ISA (Plum): ${fmt(inputs.savings.isaPlum.balance)} (AER ${pct(inputs.savings.isaPlum.rate)}), Lloyds (compte courant): ${fmt(inputs.savings.lloyds.balance)} (taux ${pct(inputs.savings.lloyds.rate)}), Boursorama: ${fmt(inputs.savings.boursorama.balance)} (taux ${pct(inputs.savings.boursorama.rate)})
 - AV (Linxea) — ETF: ${fmt(inputs.etf.current)} actuel (rendement attendu ${pct(inputs.etf.expectedReturn)}), ${fmt(inputs.etf.planned)} prévu (${inputs.etf.plannedDate}), Moneyfarm: ${fmt(inputs.moneyfarm.balance)} (rendement attendu ${pct(inputs.moneyfarm.expectedReturn)})
 - Pension (Standard Life, Trust Based): ${fmt(inputs.pension.balance)} (rendement estimé ${pct(inputs.pension.rate)})
 - PEA: ${fmt(inputs.pea.balance)} (rendement attendu ${pct(inputs.pea.expectedReturn)})
@@ -707,10 +720,24 @@ Réponds en français, de façon concise et factuelle, basé sur ces chiffres et
               </div>
 
               <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>ISA (Plum)</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
                 <Field label="Solde" value={inputs.savings.isaPlum.balance} onChange={(v) => set("savings.isaPlum.balance", v)} suffix="€" />
                 <Field label="Taux annuel (AER)" value={inputs.savings.isaPlum.rate} onChange={(v) => set("savings.isaPlum.rate", v)} step="0.001" />
                 <Field label="Contribution mensuelle" value={inputs.savings.isaPlum.monthlyContribution} onChange={(v) => set("savings.isaPlum.monthlyContribution", v)} suffix="€/mois" />
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>Lloyds (compte courant)</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 16 }}>
+                <Field label="Solde" value={inputs.savings.lloyds.balance} onChange={(v) => set("savings.lloyds.balance", v)} suffix="€" />
+                <Field label="Taux annuel" value={inputs.savings.lloyds.rate} onChange={(v) => set("savings.lloyds.rate", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.savings.lloyds.monthlyContribution} onChange={(v) => set("savings.lloyds.monthlyContribution", v)} suffix="€/mois" />
+              </div>
+
+              <div style={{ fontSize: 12, fontWeight: 500, color: INK_SOFT, marginBottom: 8 }}>Boursorama</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                <Field label="Solde" value={inputs.savings.boursorama.balance} onChange={(v) => set("savings.boursorama.balance", v)} suffix="€" />
+                <Field label="Taux annuel" value={inputs.savings.boursorama.rate} onChange={(v) => set("savings.boursorama.rate", v)} step="0.001" />
+                <Field label="Contribution mensuelle" value={inputs.savings.boursorama.monthlyContribution} onChange={(v) => set("savings.boursorama.monthlyContribution", v)} suffix="€/mois" />
               </div>
             </Card>
 
